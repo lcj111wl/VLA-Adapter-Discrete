@@ -12,7 +12,7 @@ IGNORE_INDEX = -100
 # ACTION_TOKEN_BEGIN_IDX = 31743
 ACTION_TOKEN_BEGIN_IDX  = 151386
 STOP_INDEX = 2  # '</s>'
-NUM_TOKENS = 64
+NUM_TOKENS_PER_ARM = 64 # Base number of tokens per arm
 
 
 # Defines supported normalization schemes for action and proprioceptive state.
@@ -30,6 +30,7 @@ LIBERO_CONSTANTS = {
     "ACTION_DIM": 7,
     "PROPRIO_DIM": 8,
     "ACTION_PROPRIO_NORMALIZATION_TYPE": NormalizationType.BOUNDS_Q99,
+    "NUM_TOKENS": 64,
 }
 
 CALVIN_CONSTANTS = {
@@ -37,6 +38,7 @@ CALVIN_CONSTANTS = {
     "ACTION_DIM": 7,
     "PROPRIO_DIM": 8,
     "ACTION_PROPRIO_NORMALIZATION_TYPE": NormalizationType.BOUNDS_Q99,
+    "NUM_TOKENS": 64,
 }
 
 ALOHA_CONSTANTS = {
@@ -44,6 +46,7 @@ ALOHA_CONSTANTS = {
     "ACTION_DIM": 14,
     "PROPRIO_DIM": 14,
     "ACTION_PROPRIO_NORMALIZATION_TYPE": NormalizationType.BOUNDS,
+    "NUM_TOKENS": 128, # Dual arm support
 }
 
 BRIDGE_CONSTANTS = {
@@ -51,6 +54,7 @@ BRIDGE_CONSTANTS = {
     "ACTION_DIM": 7,
     "PROPRIO_DIM": 7,
     "ACTION_PROPRIO_NORMALIZATION_TYPE": NormalizationType.BOUNDS_Q99,
+    "NUM_TOKENS": 64,
 }
 
 
@@ -89,11 +93,21 @@ NUM_ACTIONS_CHUNK = constants["NUM_ACTIONS_CHUNK"]
 ACTION_DIM = constants["ACTION_DIM"]
 PROPRIO_DIM = constants["PROPRIO_DIM"]
 ACTION_PROPRIO_NORMALIZATION_TYPE = constants["ACTION_PROPRIO_NORMALIZATION_TYPE"]
+NUM_TOKENS = constants["NUM_TOKENS"]
+
+# Derived constants for dual arm
+if ACTION_DIM == 14: # Assuming 14 means dual arm (7+7)
+    LEFT_ARM_DIM = 7
+    RIGHT_ARM_DIM = 7
+else:
+    LEFT_ARM_DIM = ACTION_DIM
+    RIGHT_ARM_DIM = 0
 
 # Print which robot platform constants are being used (for debugging)
 print(f"Using {ROBOT_PLATFORM} constants:")
 print(f"  NUM_ACTIONS_CHUNK = {NUM_ACTIONS_CHUNK}")
 print(f"  ACTION_DIM = {ACTION_DIM}")
 print(f"  PROPRIO_DIM = {PROPRIO_DIM}")
+print(f"  NUM_TOKENS = {NUM_TOKENS}")
 print(f"  ACTION_PROPRIO_NORMALIZATION_TYPE = {ACTION_PROPRIO_NORMALIZATION_TYPE}")
 print("If needed, manually set the correct constants in `prismatic/vla/constants.py`!")

@@ -35,7 +35,7 @@ from experiments.robot.openvla_utils import (
 from prismatic.extern.hf.configuration_prismatic import OpenVLAConfig
 from prismatic.extern.hf.modeling_prismatic import OpenVLAForActionPrediction
 from prismatic.extern.hf.processing_prismatic import PrismaticImageProcessor, PrismaticProcessor
-from prismatic.models.action_heads import L1RegressionActionHead, DiscreteActionHead
+from prismatic.models.action_heads import L1RegressionActionHead, DiscreteActionHead, DualArmActionHead
 from prismatic.models.backbones.llm.prompting import PurePromptBuilder
 from prismatic.models.film_vit_wrapper import FiLMedPrismaticVisionBackbone
 from prismatic.models.projectors import ProprioProjector
@@ -79,7 +79,8 @@ class FinetuneConfig:
 
     # Algorithm and architecture
     use_l1_regression: bool = True                   # If True, trains continuous action head with L1 regression objective
-    use_discrete_head: bool = True                  # If True, trains discrete action head with CrossEntropy objective
+    use_discrete_head: bool = False                  # If True, trains discrete action head with CrossEntropy objective
+    use_dual_arm: bool = False                       # If True, uses DualArmActionHead with inter-arm attention (requires ACTION_DIM=14)
     n_action_bins: int = 256                         # Number of bins for discrete action head
     use_diffusion: bool = False                      # If True, trains continuous action head with diffusion modeling objective (DDIM)
     num_diffusion_steps: int = 50                    # (When `diffusion==True`) Number of diffusion steps for training 
@@ -611,7 +612,7 @@ def save_training_checkpoint(
                 noisy_action_projector.state_dict(), checkpoint_dir / f"noisy_action_projector--{checkpoint_name_suffix}"
             )
 
-        if (cfg.use_l1_regression or cfg.use_discrete_head) and action_head is not None:
+        if (cfg.use_l1_regression or cfg.use_discrete_head or cfg.use_dual_arm) and action_head is not None:
             torch.save(action_head.state_dict(), checkpoint_dir / f"action_head--{checkpoint_name_suffix}")
 
         if cfg.use_film:
@@ -702,12 +703,13 @@ def run_validation(
                 batch=batch,
                 action_tokenizer=action_tokenizer,
                 device_id=device_id,
-                use_l1_regression=cfg.use_l1_regression,
+                use_l1_regression=(cfg.use_l1_regression or cfg.use_dual_arm),
                 use_proprio=cfg.use_proprio,
                 use_film=cfg.use_film,
                 num_patches=num_patches,
                 compute_diffusion_l1=True,
-                use_pro_version=cfg.use_pro_version
+                use_pro_version=cfg.use_pro_version,
+                cfg=cfg,
             )
 
             # Add the loss value to the metrics
@@ -754,8 +756,8 @@ def finetune(cfg: FinetuneConfig) -> None:
 
     global RAW_STATE_DICT
 
-    assert sum([cfg.use_l1_regression, cfg.use_diffusion, cfg.use_discrete_head]) <= 1, (
-        "Cannot do both L1 regression, diffusion, and discrete head. Please pick one of them!"
+    assert sum([cfg.use_l1_regression, cfg.use_diffusion, cfg.use_discrete_head, cfg.use_dual_arm]) <= 1, (
+        "Cannot do both L1 regression, diffusion, discrete head, and dual arm. Please pick one of them!"
     )
 
     # Trim trailing forward slash ('/') in VLA path if it exists
@@ -765,7 +767,7 @@ def finetune(cfg: FinetuneConfig) -> None:
     # Get experiment run ID
     run_id = get_run_id(cfg)
     
-    # ... (omitted lines for brevity, assuming context match is sufficient) ...
+    # ... (omitted lines for brevity) ...
 
     # If applicable, instantiate proprio projector
     if cfg.use_proprio:
@@ -811,13 +813,29 @@ def finetune(cfg: FinetuneConfig) -> None:
         to_bf16=True,
         )
 
+    # If applicable, instantiate dual arm action head
+    elif cfg.use_dual_arm:
+        action_head = init_module(
+        DualArmActionHead,
+        "action_head",
+        cfg,
+        device_id,
+        {
+            "input_dim": vla.module.llm_dim, 
+            "hidden_dim": vla.module.llm_dim, 
+            "action_dim": ACTION_DIM,
+            "use_pro_version": cfg.use_pro_version,
+            },
+        to_bf16=True,
+        )
+
     # Get number of vision patches
     NUM_PATCHES = vla.module.vision_backbone.get_num_patches() * vla.module.vision_backbone.get_num_images_in_input()
     # If we have proprio inputs, a single proprio embedding is appended to the end of the vision patch embeddings
 
     # Instantiate optimizer
     trainable_params = [param for param in vla.parameters() if param.requires_grad]
-    if cfg.use_l1_regression or cfg.use_discrete_head:
+    if cfg.use_l1_regression or cfg.use_discrete_head or cfg.use_dual_arm:
         trainable_params += [param for param in action_head.parameters() if param.requires_grad]
 
     if cfg.use_proprio:
@@ -942,7 +960,7 @@ def finetune(cfg: FinetuneConfig) -> None:
                 batch=batch,
                 action_tokenizer=action_tokenizer,
                 device_id=device_id,
-                use_l1_regression=cfg.use_l1_regression,
+                use_l1_regression=(cfg.use_l1_regression or cfg.use_dual_arm),
                 use_proprio=cfg.use_proprio,
                 use_film=cfg.use_film,
                 num_patches=NUM_PATCHES,
